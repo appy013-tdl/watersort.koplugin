@@ -13,6 +13,8 @@ Since e-ink devices (Kindle, Kobo, PocketBook, reMarkable, etc.) cannot display 
 * **Designed for E-Ink Displays:** Uses crisp 1-bit/grayscale procedural patterns (`Blitbuffer`) with centered number badges (`1`–`9`, `0`) for instant readability with zero eye strain.
 * **Unlimited Procedural Levels:** Powered by a deterministic Linear Congruential Generator (LCG) and Fisher-Yates multiset permutations. Level $X$ is always identical across all devices without requiring a heavy database of pre-made levels.
 * **Progressive Difficulty Scaling:** Starts at $N = 4$ patterns (6 bottles) on early levels and gradually scales up to $N = 10$ patterns (12 bottles).
+* **Smart Deadlock Detection:** Automatically detects both strict deadlocks (no valid pours left) and inescapable loop deadlocks (when only endless back-and-forth partial pours remain), displaying a recovery dialog immediately so you don't waste undos.
+* **Strategic Lifelines:** Includes 5 Undos per level and +1 Extra Empty Bottle per level, accessible anytime from the bottom control bar or the deadlock recovery popup.
 * **Full State Persistence:** Automatically saves your current level, exact bottle state, move counter, and undo history via `G_reader_settings`. Close the game to read your book and pick up right where you left off.
 * **Ghosting & Refresh Optimization:** Uses fast partial `"ui"` refreshes when selecting and pouring bottles, and triggers a `"full"` e-ink flash refresh when loading new levels or exiting the game.
 * **Zero External Assets:** Pure Lua implementation with DPI-aware scaling (`Screen:scaleBySize`), adapting cleanly to everything from 167 PPI Basic Kindles to 300 PPI Paperwhites, Scribes, and Kobos.
