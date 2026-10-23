@@ -1,3 +1,5 @@
+<img width="3584" height="1184" alt="Gemini_Generated_Image_9qjldb9qjldb9qjl" src="https://github.com/user-attachments/assets/5bf4b4c1-9a38-4c7e-9a4e-b29087dba608" />
+
 # Water Sort Puzzle for KOReader (`watersort.koplugin`)
 
 An e-ink optimized, monochrome **Water Sort Puzzle** plugin built natively for [KOReader](https://github.com/koreader/koreader). 
