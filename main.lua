@@ -1,5 +1,6 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
+local ButtonDialog = require("ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
@@ -12,20 +13,18 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local RenderText = require("ui/rendertext")
-local Size = require("ui/size")
-local TextWidget = require("ui/widget/textwidget")
+local Screen = Device.screen
 local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local Screen = Device.screen
-
 local CAPACITY = 4
 local EMPTY_BOTTLES = 2
+local MAX_UNDOS = 5
+local MAX_EXTRA_BOTTLES = 1
 local SETTINGS_KEY = "watersort_game_state"
 
 -- Pattern Metadata (1 to 10)
@@ -47,7 +46,6 @@ local PATTERNS = {
 --------------------------------------------------------------------------------
 local LevelGenerator = {}
 
--- Determine how many distinct patterns to use for a given level
 function LevelGenerator.getPatternCount(level)
     if level <= 2 then return 4
     elseif level <= 6 then return 5
@@ -58,7 +56,6 @@ function LevelGenerator.getPatternCount(level)
     else return 10 end
 end
 
--- Create a deterministic pseudo-random number generator for any level number
 function LevelGenerator.makeRNG(seed)
     local state = (seed * 1103515245 + 12345) % 2147483648
     if state == 0 then state = 1 end
@@ -148,9 +145,7 @@ function BottleBoardWidget:getSize()
     return self.dimen
 end
 
--- Procedural 1-bit/grayscale pattern renderer for a single liquid segment
 function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
-    -- Base white background for the liquid unit
     bb:paintRect(x, y, w, h, Blitbuffer.COLOR_WHITE)
 
     local s1 = math.max(1, Screen:scaleBySize(1))
@@ -161,25 +156,21 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
     local s8 = math.max(8, Screen:scaleBySize(8))
 
     if pattern_id == 1 then
-        -- 1: Solid Black
         bb:paintRect(x, y, w, h, Blitbuffer.COLOR_BLACK)
 
     elseif pattern_id == 2 then
-        -- 2: Horizontal Stripes
         for py = y, y + h - 1, s4 do
             local band_h = math.min(s2, y + h - py)
             bb:paintRect(x, py, w, band_h, Blitbuffer.COLOR_BLACK)
         end
 
     elseif pattern_id == 3 then
-        -- 3: Vertical Stripes
         for px = x, x + w - 1, s4 do
             local band_w = math.min(s2, x + w - px)
             bb:paintRect(px, y, band_w, h, Blitbuffer.COLOR_BLACK)
         end
 
     elseif pattern_id == 4 then
-        -- 4: Polka Dots
         for py = y + s2, y + h - s3, s6 do
             for px = x + s2, x + w - s3, s6 do
                 bb:paintRect(px, py, s3, s3, Blitbuffer.COLOR_BLACK)
@@ -187,7 +178,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 5 then
-        -- 5: Checkerboard
         local row = 0
         for py = y, y + h - 1, s4 do
             local col = 0
@@ -203,7 +193,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 6 then
-        -- 6: Diagonal Forward Slash (//)
         for py = y, y + h - 1, s2 do
             local dy = py - y
             for px = x, x + w - 1, s2 do
@@ -215,7 +204,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 7 then
-        -- 7: Diagonal Backslash (\\)
         for py = y, y + h - 1, s2 do
             local dy = py - y
             for px = x, x + w - 1, s2 do
@@ -227,7 +215,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 8 then
-        -- 8: Crosshatch Grid (#)
         for py = y, y + h - 1, s6 do
             bb:paintRect(x, py, w, math.min(s1, y + h - py), Blitbuffer.COLOR_BLACK)
         end
@@ -236,7 +223,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 9 then
-        -- 9: Brick Wall
         local row = 0
         for py = y, y + h - 1, s6 do
             bb:paintRect(x, py, w, math.min(s1, y + h - py), Blitbuffer.COLOR_BLACK)
@@ -249,7 +235,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
 
     elseif pattern_id == 10 then
-        -- 10: Concentric Rings
         bb:paintRect(x, y, w, h, Blitbuffer.COLOR_GRAY_D)
         bb:paintBorder(x + s2, y + s2, math.max(2, w - 2 * s2), math.max(2, h - 2 * s2), s2, Blitbuffer.COLOR_BLACK)
         if w > 4 * s3 and h > 4 * s3 then
@@ -257,7 +242,7 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         end
     end
 
-    -- Draw high-contrast centered badge pill so patterns are 100% unambiguous
+    -- Draw high-contrast centered badge pill
     local badge_text = PATTERNS[pattern_id] and PATTERNS[pattern_id].label or "?"
     local tsize = RenderText:sizeUtf8Text(0, w, self.label_face, badge_text, true, false)
     local bw = tsize.x + s6
@@ -278,7 +263,6 @@ function BottleBoardWidget:drawPattern(bb, x, y, w, h, pattern_id)
         Blitbuffer.COLOR_BLACK
     )
 
-    -- Divider line at the top of each liquid layer
     bb:paintRect(x, y, w, s1, Blitbuffer.COLOR_BLACK)
 end
 
@@ -291,7 +275,6 @@ function BottleBoardWidget:paintTo(bb, x, y)
     local num_bottles = #bottles
     if num_bottles == 0 then return end
 
-    -- Split into 1 or 2 rows depending on bottle count
     local rows = (num_bottles <= 6) and 1 or 2
     local cols = math.ceil(num_bottles / rows)
 
@@ -309,9 +292,8 @@ function BottleBoardWidget:paintTo(bb, x, y)
     local rim_h = Screen:scaleBySize(5)
 
     local inner_w = bottle_w - 2 * border_w
-    local inner_h = bottle_h - border_w -- open top, solid bottom
+    local inner_h = bottle_h - border_w
     local layer_h = math.floor(inner_h / CAPACITY)
-    -- Adjust inner_h to be an exact multiple of layer_h
     inner_h = layer_h * CAPACITY
     bottle_h = inner_h + border_w
 
@@ -321,7 +303,6 @@ function BottleBoardWidget:paintTo(bb, x, y)
         local r = math.floor((i - 1) / cols)
         local c = (i - 1) % cols
 
-        -- Center the second row if it has fewer bottles
         local cols_in_this_row = (r == rows - 1) and (num_bottles - r * cols) or cols
         local row_width = cols_in_this_row * cell_w
         local row_start_x = x + math.floor((self.width - row_width) / 2)
@@ -333,7 +314,6 @@ function BottleBoardWidget:paintTo(bb, x, y)
             by = by - lift_offset
         end
 
-        -- Save touch hit-box for this bottle (slightly padded for comfortable tapping)
         self.bottle_rects[i] = Geom:new{
             x = bx - rim_overhang,
             y = by - lift_offset,
@@ -341,7 +321,6 @@ function BottleBoardWidget:paintTo(bb, x, y)
             h = bottle_h + 2 * lift_offset,
         }
 
-        -- Draw selection indicator above the bottle if selected
         if is_selected then
             local ind_w = math.floor(bottle_w * 0.5)
             local ind_h = Screen:scaleBySize(5)
@@ -354,7 +333,6 @@ function BottleBoardWidget:paintTo(bb, x, y)
             )
         end
 
-        -- Draw liquid layers (1 = bottom, CAPACITY = top)
         local bottle = bottles[i]
         for layer = 1, #bottle do
             local pattern_id = bottle[layer]
@@ -363,13 +341,13 @@ function BottleBoardWidget:paintTo(bb, x, y)
             self:drawPattern(bb, lx, ly, inner_w, layer_h, pattern_id)
         end
 
-        -- Draw Bottle Rim (top lip), Left Wall, Right Wall, and Thick Base
+        -- Bottle Rim, Walls, and Base
         bb:paintRect(bx - rim_overhang, by, bottle_w + 2 * rim_overhang, rim_h, Blitbuffer.COLOR_BLACK)
         bb:paintRect(bx, by, border_w, bottle_h, Blitbuffer.COLOR_BLACK)
         bb:paintRect(bx + bottle_w - border_w, by, border_w, bottle_h, Blitbuffer.COLOR_BLACK)
         bb:paintRect(bx, by + bottle_h - border_w, bottle_w, border_w * 2, Blitbuffer.COLOR_BLACK)
 
-        -- Draw checkmark stripe underneath completed monochromatic bottles
+        -- Completed monochromatic indicator bar below bottle
         if #bottle == CAPACITY and bottle[1] == bottle[2] and bottle[2] == bottle[3] and bottle[3] == bottle[4] then
             bb:paintRect(
                 bx + border_w,
@@ -418,12 +396,19 @@ function WaterSortDialog:init()
     self.bottles = self.plugin.bottles
     self.moves = self.plugin.moves or 0
     self.history = self.plugin.history or {}
+    self.undos_left = (self.plugin.undos_left ~= nil) and self.plugin.undos_left or MAX_UNDOS
+    self.extra_bottles_left = (self.plugin.extra_bottles_left ~= nil) and self.plugin.extra_bottles_left or MAX_EXTRA_BOTTLES
     self.selected_bottle = nil
 
     if not self.bottles or #self.bottles == 0 then
         self:loadLevel(self.level)
     else
         self:buildLayout()
+        if not self:isSolved() and self:isDeadlocked() then
+            UIManager:scheduleIn(0.1, function()
+                self:showDeadlockDialog()
+            end)
+        end
     end
 end
 
@@ -432,6 +417,8 @@ function WaterSortDialog:loadLevel(level_num)
     self.bottles = LevelGenerator.generate(self.level)
     self.moves = 0
     self.history = {}
+    self.undos_left = MAX_UNDOS
+    self.extra_bottles_left = MAX_EXTRA_BOTTLES
     self.selected_bottle = nil
     self:saveState()
     self:buildLayout()
@@ -439,7 +426,14 @@ function WaterSortDialog:loadLevel(level_num)
 end
 
 function WaterSortDialog:saveState()
-    self.plugin:saveGameState(self.level, self.bottles, self.moves, self.history)
+    self.plugin:saveGameState(
+        self.level,
+        self.bottles,
+        self.moves,
+        self.history,
+        self.undos_left,
+        self.extra_bottles_left
+    )
 end
 
 function WaterSortDialog:buildLayout()
@@ -447,20 +441,33 @@ function WaterSortDialog:buildLayout()
         width = self.dimen.w,
         fullscreen = true,
         title = T(_("Water Sort • Level %1"), self.level),
-        subtitle = T(_("Moves: %1   |   Patterns: %2"), self.moves, LevelGenerator.getPatternCount(self.level)),
+        subtitle = T(
+            _("Moves: %1  |  Undos: %2/%3  |  +Bottle: %4/%5"),
+            self.moves,
+            self.undos_left,
+            MAX_UNDOS,
+            self.extra_bottles_left,
+            MAX_EXTRA_BOTTLES
+        ),
         close_callback = function()
             self:onClose()
         end,
     }
 
-    local btn_pad = Screen:scaleBySize(8)
-    local btn_width = math.floor((self.dimen.w - Screen:scaleBySize(60)) / 4)
+    local btn_pad = Screen:scaleBySize(6)
+    local btn_width = math.floor((self.dimen.w - Screen:scaleBySize(64)) / 5)
 
     local undo_btn = Button:new{
-        text = _("Undo"),
+        text = T(_("Undo (%1)"), self.undos_left),
         width = btn_width,
-        enabled = (#self.history > 0),
+        enabled = (#self.history > 0 and self.undos_left > 0),
         callback = function() self:undoMove() end,
+    }
+    local add_bottle_btn = Button:new{
+        text = T(_("+Bottle (%1)"), self.extra_bottles_left),
+        width = btn_width,
+        enabled = (self.extra_bottles_left > 0),
+        callback = function() self:addExtraBottle() end,
     }
     local restart_btn = Button:new{
         text = _("Restart"),
@@ -485,6 +492,8 @@ function WaterSortDialog:buildLayout()
             dimen = Geom:new{ w = self.dimen.w, h = undo_btn:getSize().h + 2 * btn_pad },
             HorizontalGroup:new{
                 undo_btn,
+                HorizontalSpan:new{ width = btn_pad },
+                add_bottle_btn,
                 HorizontalSpan:new{ width = btn_pad },
                 restart_btn,
                 HorizontalSpan:new{ width = btn_pad },
@@ -549,6 +558,7 @@ function WaterSortDialog:executePour(from_idx, to_idx)
 end
 
 function WaterSortDialog:undoMove()
+    if #self.history == 0 or self.undos_left <= 0 then return end
     local last = table.remove(self.history)
     if not last then return end
 
@@ -557,7 +567,19 @@ function WaterSortDialog:undoMove()
     for _ = 1, last.count do
         table.insert(src, table.remove(dst))
     end
+
+    self.undos_left = math.max(0, self.undos_left - 1)
     self.moves = math.max(0, self.moves - 1)
+    self.selected_bottle = nil
+    self:saveState()
+    self:buildLayout()
+    self:refreshScreen("ui")
+end
+
+function WaterSortDialog:addExtraBottle()
+    if self.extra_bottles_left <= 0 then return end
+    self.extra_bottles_left = self.extra_bottles_left - 1
+    table.insert(self.bottles, {})
     self.selected_bottle = nil
     self:saveState()
     self:buildLayout()
@@ -577,9 +599,114 @@ function WaterSortDialog:isSolved()
     return true
 end
 
+-- Helper: count how many contiguous matching units sit at the top of a bottle
+function WaterSortDialog:getTopRun(bottle)
+    if #bottle == 0 then return 0, nil end
+    local top_p = bottle[#bottle]
+    local run = 0
+    for i = #bottle, 1, -1 do
+        if bottle[i] == top_p then
+            run = run + 1
+        else
+            break
+        end
+    end
+    return run, top_p
+end
+
+-- Detects both strict deadlocks (no valid pours) and loop deadlocks (no bottle can clear its top layer)
+function WaterSortDialog:isDeadlocked()
+    if self:isSolved() then return false end
+
+    -- 1. If any empty bottle exists and the level isn't solved, a productive move is always possible
+    for _, bottle in ipairs(self.bottles) do
+        if #bottle == 0 then
+            return false
+        end
+    end
+
+    -- 2. Sum available free slots per top pattern across all bottles
+    local free_by_pattern = {}
+    for _, bottle in ipairs(self.bottles) do
+        local top_p = bottle[#bottle]
+        local free_space = CAPACITY - #bottle
+        free_by_pattern[top_p] = (free_by_pattern[top_p] or 0) + free_space
+    end
+
+    -- 3. Check if at least one bottle can completely offload its contiguous top layer
+    --    into other bottles with the same top pattern (exposing a new pattern or emptying the bottle)
+    for _, bottle in ipairs(self.bottles) do
+        local top_run, top_p = self:getTopRun(bottle)
+        if top_run < CAPACITY then
+            local free_here = CAPACITY - #bottle
+            local other_free = (free_by_pattern[top_p] or 0) - free_here
+            if other_free >= top_run then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+function WaterSortDialog:showDeadlockDialog()
+    local dialog
+    dialog = ButtonDialog:new{
+        title = _(
+            "Deadlock! No Moves Left\n\n"
+            .. "There are no productive pours remaining.\n"
+            .. "Choose an option to continue:"
+        ),
+        title_align = "center",
+        buttons = {
+            {
+                {
+                    text = T(_("Undo Move (%1/%2 left)"), self.undos_left, MAX_UNDOS),
+                    enabled = (#self.history > 0 and self.undos_left > 0),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:undoMove()
+                        if not self:isSolved() and self:isDeadlocked() then
+                            UIManager:scheduleIn(0.1, function()
+                                self:showDeadlockDialog()
+                            end)
+                        end
+                    end,
+                },
+            },
+            {
+                {
+                    text = T(_("+1 Empty Bottle (%1/%2 left)"), self.extra_bottles_left, MAX_EXTRA_BOTTLES),
+                    enabled = (self.extra_bottles_left > 0),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:addExtraBottle()
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("Restart Level"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:loadLevel(self.level)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
 function WaterSortDialog:onBottleTapped(idx)
+    -- If the board is currently deadlocked and the user dismissed the popup to inspect the board,
+    -- tapping any bottle brings the deadlock recovery popup right back.
+    if not self:isSolved() and self:isDeadlocked() then
+        self:showDeadlockDialog()
+        return
+    end
+
     if not self.selected_bottle then
-        -- Only select non-empty bottles
         if #self.bottles[idx] > 0 then
             self.selected_bottle = idx
             self:refreshScreen("ui")
@@ -588,7 +715,6 @@ function WaterSortDialog:onBottleTapped(idx)
     end
 
     if self.selected_bottle == idx then
-        -- Tapping the same bottle deselects it
         self.selected_bottle = nil
         self:refreshScreen("ui")
         return
@@ -604,15 +730,20 @@ function WaterSortDialog:onBottleTapped(idx)
             local finished_level = self.level
             local finished_moves = self.moves
             UIManager:show(InfoMessage:new{
-                text = T(_("Level %1 Solved in %2 moves!\n\nTap anywhere to start Level %3."),
-                    finished_level, finished_moves, finished_level + 1),
+                text = T(
+                    _("Level %1 Solved in %2 moves!\n\nTap anywhere to start Level %3."),
+                    finished_level,
+                    finished_moves,
+                    finished_level + 1
+                ),
                 dismiss_callback = function()
                     self:loadLevel(finished_level + 1)
                 end,
             })
+        elseif self:isDeadlocked() then
+            self:showDeadlockDialog()
         end
     else
-        -- If invalid pour target, switch selection if the tapped bottle has liquid
         if #self.bottles[idx] > 0 then
             self.selected_bottle = idx
         else
@@ -687,24 +818,32 @@ function WaterSortPlugin:loadGameState()
         self.bottles = saved.bottles
         self.moves = saved.moves or 0
         self.history = saved.history or {}
+        self.undos_left = (saved.undos_left ~= nil) and saved.undos_left or MAX_UNDOS
+        self.extra_bottles_left = (saved.extra_bottles_left ~= nil) and saved.extra_bottles_left or MAX_EXTRA_BOTTLES
     else
         self.level = 1
         self.bottles = nil
         self.moves = 0
         self.history = {}
+        self.undos_left = MAX_UNDOS
+        self.extra_bottles_left = MAX_EXTRA_BOTTLES
     end
 end
 
-function WaterSortPlugin:saveGameState(level, bottles, moves, history)
+function WaterSortPlugin:saveGameState(level, bottles, moves, history, undos_left, extra_bottles_left)
     self.level = level
     self.bottles = bottles
     self.moves = moves
     self.history = history
+    self.undos_left = undos_left
+    self.extra_bottles_left = extra_bottles_left
     G_reader_settings:saveSetting(SETTINGS_KEY, {
         level = level,
         bottles = bottles,
         moves = moves,
         history = history,
+        undos_left = undos_left,
+        extra_bottles_left = extra_bottles_left,
     })
 end
 
