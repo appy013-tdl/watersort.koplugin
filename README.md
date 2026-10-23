@@ -72,9 +72,9 @@ The generator seeds a deterministic PRNG using the level number, shuffles the $4
 ## Installation
 
 ### Method 1: Direct Download / USB Transfer
-1. Download or clone this repository.
+1. Download ZIP from the [latest release](https://github.com/appy013-tdl/watersort.koplugin/releases/tag/koreader-plugin).
 2. Connect your e-reader (Kindle, Kobo, PocketBook, etc.) to your computer via USB.
-3. Copy the `watersort.koplugin` folder into your device's `koreader/plugins/` directory:
+3. Extract Zip & Copy the `watersort.koplugin` folder into your device's `koreader/plugins/` directory:
    ```text
    koreader/
    └── plugins/
